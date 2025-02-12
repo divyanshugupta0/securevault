@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background: #f5f5f5;
+        }
+
+        .navbar {
+            background: #1e3c72;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .navbar h1 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logout-btn {
+            background: transparent;
+            border: 2px solid white;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: white;
+            color: #1e3c72;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .files-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .file-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .file-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .file-preview {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            background-color: #000;
+        }
+
+        video.file-preview {
+            object-fit: contain;
+            background-color: #000;
+        }
+
+        .file-info {
+            margin-top: auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .file-name {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .file-type {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .download-btn {
+            background: #1e3c72;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            width: 100%;
+            justify-content: center;
+            transition: background 0.3s;
+        }
+
+        .download-btn:hover {
+            background: #15294f;
+        }
+
+        .no-files {
+            text-align: center;
+            color: #666;
+            margin-top: 2rem;
+        }
+
+        .upload-btn {
+            background: #1e3c72;
+            color: white;
+            border: none;
+            padding: 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 1rem;
+        }
+
+        .error-message {
+            color: #dc3545;
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1><i class="fas fa-shield-alt"></i> Secure Dashboard</h1>
+        <button class="logout-btn" onclick="logout()">
+            <i class="fas fa-sign-out-alt"></i> Logout
+        </button>
+    </nav>
+
+    <div class="container">
+        <input type="file" id="fileUpload" style="display: none" accept="image/*,video/*" onchange="uploadFile(this.files[0])">
+        <button class="upload-btn" onclick="document.getElementById('fileUpload').click()">
+            <i class="fas fa-upload"></i> Upload File
+        </button>
+        <div id="uploadError" class="error-message"></div>
+        <div class="files-grid" id="filesGrid">
+            <!-- Files will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <script>
+        const IMAGEKIT_PUBLIC_KEY = "public_8ZpNPIOc7wFWD/4E+lFpaKDqkoY=";
+        const IMAGEKIT_ENDPOINT = "https://upload.imagekit.io/api/v1/files/upload";
+        const IMAGEKIT_URL_ENDPOINT = "https://ik.imagekit.io/ev4vb6etm";
+        const IMAGE_TRANSFORM = "?tr=w-300,h-300";
+
+        // Check authentication immediately when page loads
+        window.onload = function() {
+            checkAuthentication();
+            initializeSession();
+            loadImagesFromImageKit();
+        };
+
+        function checkAuthentication() {
+            const authenticated = sessionStorage.getItem('authenticated');
+            if (!authenticated || authenticated !== 'true') {
+                window.location.replace('securevault.html');
+                return false;
+            }
+            return true;
+        }
+
+        async function uploadFile(file) {
+            const uploadError = document.getElementById('uploadError');
+            uploadError.style.display = 'none';
+
+            if (!file) {
+                uploadError.textContent = 'Please select a file to upload';
+                uploadError.style.display = 'block';
+                return;
+            }
+
+            // Check if file is an image or video
+            if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+                uploadError.textContent = 'Please upload only image or video files';
+                uploadError.style.display = 'block';
+                return;
+            }
+
+            try {
+                // Get authentication parameters
+                const authResponse = await fetch('/get-imagekit-auth');
+                const authData = await authResponse.json();
+
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('fileName', file.name);
+                formData.append('signature', authData.signature);
+                formData.append('token', authData.token);
+                formData.append('expire', authData.expire);
+                formData.append('publicKey', IMAGEKIT_PUBLIC_KEY);
+
+                const response = await fetch(IMAGEKIT_ENDPOINT, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const responseData = await response.json();
+
+                if (response.ok) {
+                    loadImagesFromImageKit();
+                } else {
+                    uploadError.textContent = responseData.message || 'Failed to upload file';
+                    uploadError.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                uploadError.textContent = 'Error uploading file. Please try again.';
+                uploadError.style.display = 'block';
+            }
+        }
+
+        async function loadImagesFromImageKit() {
+            try {
+                const response = await fetch(IMAGEKIT_ENDPOINT + 'files');
+                const responseText = await response.text();
+                
+                let files;
+                try {
+                    files = JSON.parse(responseText);
+                } catch (e) {
+                    throw new Error(`Failed to parse server response as JSON: ${responseText.substring(0, 100)}...`);
+                }
+
+                if (Array.isArray(files)) {
+                    displayFiles(files);
+                } else {
+                    throw new Error('Server response is not in the expected format');
+                }
+            } catch (error) {
+                console.error('Error loading images:', error);
+                const grid = document.getElementById('filesGrid');
+                grid.innerHTML = `<div class="no-files">Error loading images: ${error.message}</div>`;
+            }
+        }
+
+        function createFileCard(file) {
+            const card = document.createElement('div');
+            card.className = 'file-card';
+
+            const isVideo = file.fileType.startsWith('video/');
+            const mediaUrl = IMAGEKIT_URL_ENDPOINT + file.filePath;
+            const previewUrl = isVideo ? 
+                mediaUrl + '?tr=w-300,h-300,f-jpg' : // Video thumbnail
+                mediaUrl + IMAGE_TRANSFORM; // Image preview
+
+            let mediaPreview;
+            if (isVideo) {
+                mediaPreview = `
+                    <video class="file-preview" controls>
+                        <source src="${mediaUrl}" type="${file.fileType}">
+                        Your browser does not support the video tag.
+                    </video>`;
+            } else {
+                mediaPreview = `<img src="${previewUrl}" alt="${file.name}" class="file-preview">`;
+            }
+
+            card.innerHTML = `
+                ${mediaPreview}
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-type">${file.fileType}</div>
+                </div>
+                <button class="download-btn" onclick="downloadFile('${mediaUrl}', '${file.name}')">
+                    <i class="fas fa-download"></i> Download
+                </button>
+            `;
+
+            return card;
+        }
+
+        function displayFiles(files) {
+            const grid = document.getElementById('filesGrid');
+            if (files.length === 0) {
+                grid.innerHTML = '<div class="no-files">No files available</div>';
+                return;
+            }
+
+            grid.innerHTML = ''; // Clear existing content
+            files.forEach(file => {
+                grid.appendChild(createFileCard(file));
+            });
+        }
+
+        function downloadFile(url, filename) {
+            fetch(url)
+                .then(response => response.blob())
+                .then(blob => {
+                    const blobUrl = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(blobUrl);
+                })
+                .catch(error => {
+                    console.error('Download error:', error);
+                    alert('Error downloading file. Please try again.');
+                });
+        }
+
+        function initializeSession() {
+            if (!sessionStorage.getItem('sessionStart')) {
+                sessionStorage.setItem('sessionStart', new Date().getTime().toString());
+            }
+            
+            ['click', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(event => {
+                document.addEventListener(event, resetSessionTimer, true);
+            });
+
+            sessionCheckInterval = setInterval(checkSession, 60000);
+            checkSession();
+        }
+
+        function checkSession() {
+            const authenticated = sessionStorage.getItem('authenticated');
+            const sessionStart = sessionStorage.getItem('sessionStart');
+            
+            if (!authenticated || !sessionStart) {
+                console.log('Missing auth or session start');
+                logout();
+                return;
+            }
+
+            const currentTime = new Date().getTime();
+            const timeDiff = currentTime - parseInt(sessionStart);
+            
+            if (timeDiff > SESSION_TIMEOUT) {
+                console.log('Session timeout');
+                logout();
+            }
+        }
+
+        function resetSessionTimer() {
+            if (sessionStorage.getItem('authenticated') === 'true') {
+                sessionStorage.setItem('sessionStart', new Date().getTime().toString());
+            }
+        }
+
+        function logout() {
+            if (sessionCheckInterval) {
+                clearInterval(sessionCheckInterval);
+            }
+            sessionStorage.clear();
+            window.location.replace('securevault.html');
+        }
+
+        // Prevent going back
+        history.pushState(null, null, location.href);
+        window.onpopstate = function () {
+            history.go(1);
+        };
+        
+        const SESSION_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
+        let sessionCheckInterval;
+
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'authenticated' && !e.newValue) {
+                window.location.replace('securevault.html');
+            }
+        });
+
+        window.addEventListener('unload', function() {
+            if (sessionCheckInterval) {
+                clearInterval(sessionCheckInterval);
+            }
+        });
+
+        /*(function() {
+            function closeWindow() {
+                window.close();
+                window.location.href = 'about:blank';
+            }
+    
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+            });
+    
+            document.addEventListener('keydown', function(e) {
+                if (
+                    (e.ctrlKey && e.shiftKey && e.keyCode === 73) ||
+                    (e.ctrlKey && e.shiftKey && e.keyCode === 74) ||
+                    (e.ctrlKey && e.keyCode === 85) ||
+                    e.keyCode === 123
+                ) {
+                    e.preventDefault();
+                    closeWindow();
+                }
+            });
+    
+            let detectDevTools = function() {
+                const threshold = 160;
+                const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+                const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+                
+                if (widthThreshold || heightThreshold) {
+                    closeWindow();
+                }
+            }
+    
+            const consoleOutput = function() {
+                console.clear();
+            };
+    
+            window.addEventListener('resize', detectDevTools);
+            
+            document.onkeydown = function(e) {
+                if(e.keyCode == 123) {
+                    closeWindow();
+                    return false;
+                }
+                if(e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) {
+                    closeWindow();
+                    return false;
+                }
+                if(e.ctrlKey && e.shiftKey && e.keyCode == 'C'.charCodeAt(0)) {
+                    closeWindow();
+                    return false;
+                }
+                if(e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) {
+                    closeWindow();
+                    return false;
+                }
+                if(e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) {
+                    closeWindow();
+                    return false;
+                }
+            }
+    
+            document.onmousedown = function(e) {
+                if(e.button == 2) {
+                    return false;
+                }
+            }
+        })();*/
+    </script>
+</body>
+</html>
